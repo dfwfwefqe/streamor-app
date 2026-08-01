@@ -11,8 +11,17 @@ import RoomInfoPanel from '@/components/RoomInfoPanel';
 import { useRoomStore } from '@/store/useRoomStore';
 
 // In production Socket.IO runs on the same origin as Next.js
-const SIGNALING_SERVER = process.env.NEXT_PUBLIC_SIGNALING_SERVER ||
-  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001');
+const getSignalingServer = () => {
+  if (process.env.NEXT_PUBLIC_SIGNALING_SERVER) {
+    return process.env.NEXT_PUBLIC_SIGNALING_SERVER;
+  }
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return window.location.origin;
+    }
+  }
+  return 'http://localhost:3001';
+};
 
 export default function RoomPage() {
   const params = useParams();
@@ -45,7 +54,9 @@ export default function RoomPage() {
   useEffect(() => {
     if (!username || !role) return;
 
-    const newSocket = io(SIGNALING_SERVER);
+    const serverUrl = getSignalingServer();
+    console.log('[Room] Connecting to signaling server:', serverUrl);
+    const newSocket = io(serverUrl);
     setSocket(newSocket);
 
     newSocket.on('connect', () => {

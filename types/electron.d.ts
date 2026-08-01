@@ -3,7 +3,7 @@ export interface ElectronAPI {
   resolveStream: (rawUrl: string) => Promise<{ success: boolean; directUrl?: string; error?: string }>;
 
   // Torrent API
-  searchStreams: (tmdbIdOrTitle: string | number) => void;
+  searchStreams: (tmdbIdOrTitle: string | number, titleHint?: string) => void;
   onStreamResults: (callback: (results: Array<{ title: string; quality: string; size: string; magnet: string; }>) => void) => () => void;
   startTorrent: (magnet: string) => void;
   onTorrentReady: (callback: (payload: { streamUrl: string; infoHash: string }) => void) => () => void;

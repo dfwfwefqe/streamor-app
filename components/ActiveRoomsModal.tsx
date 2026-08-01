@@ -12,7 +12,17 @@ interface ActiveRoom {
   isPlaying: boolean;
 }
 
-const SIGNALING_SERVER = process.env.NEXT_PUBLIC_SIGNALING_SERVER || 'http://localhost:3001';
+const getSignalingServer = () => {
+  if (process.env.NEXT_PUBLIC_SIGNALING_SERVER) {
+    return process.env.NEXT_PUBLIC_SIGNALING_SERVER;
+  }
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return window.location.origin;
+    }
+  }
+  return 'http://localhost:3001';
+};
 
 export default function ActiveRoomsModal() {
   const { isActiveRoomsModalOpen, closeActiveRoomsModal } = useUiStore();
@@ -34,7 +44,8 @@ export default function ActiveRoomsModal() {
   const fetchRooms = async () => {
     try {
       setIsLoading(true);
-      const res = await fetch(`${SIGNALING_SERVER}/api/rooms`);
+      const serverUrl = getSignalingServer();
+      const res = await fetch(`${serverUrl}/api/rooms`);
       if (res.ok) {
         const data = await res.json();
         setRooms(data.rooms || []);

@@ -57,8 +57,8 @@ export default function StreamResolver({ socket }: StreamResolverProps) {
     // 2. Dispatch IPC search request if not already dispatched for this query
     if (searchDispatchedRef.current !== searchQuery) {
       searchDispatchedRef.current = searchQuery;
-      console.log('[StreamResolver] Dispatching stream search for:', searchQuery);
-      (window as any).electron.searchStreams(searchQuery);
+      console.log('[StreamResolver] Dispatching stream search for:', searchQuery, 'titleHint:', title);
+      (window as any).electron.searchStreams(searchQuery, title || undefined);
     }
 
     return () => {
@@ -85,8 +85,8 @@ export default function StreamResolver({ socket }: StreamResolverProps) {
 
     if (typeof window !== 'undefined' && (window as any).electron?.searchStreams) {
       const query = String((tmdbId ?? title) || '').trim();
-      console.log('[StreamResolver] Manual Retry for:', query);
-      (window as any).electron.searchStreams(query);
+      console.log('[StreamResolver] Manual Retry for:', query, 'titleHint:', title);
+      (window as any).electron.searchStreams(query, title || undefined);
     }
   };
 

@@ -9,8 +9,8 @@ contextBridge.exposeInMainWorld('electron', {
   },
 
   // Torrent API
-  searchStreams: (tmdbIdOrTitle: string | number) => {
-    ipcRenderer.send('stream:search', { tmdbId: tmdbIdOrTitle });
+  searchStreams: (tmdbIdOrTitle: string | number, titleHint?: string) => {
+    ipcRenderer.send('stream:search', { tmdbId: tmdbIdOrTitle, title: titleHint });
   },
   onStreamResults: (callback: (results: Array<{ title: string; quality: string; size: string; magnet: string; }>) => void) => {
     const handler = (_: any, payload: any) => callback(payload);

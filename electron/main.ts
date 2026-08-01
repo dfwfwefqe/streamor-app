@@ -96,7 +96,9 @@ const DEFAULT_HEADERS = {
   'Accept-Language': 'en-US,en;q=0.9',
 };
 
-const TMDB_API_KEY = process.env.TMDB_API_KEY || '';
+function getTmdbApiKey(): string {
+  return process.env.TMDB_API_KEY || '8e2be4aa080a70388e9d3514dcc73339';
+}
 
 interface ResolvedMedia {
   imdbId: string;
@@ -106,15 +108,18 @@ interface ResolvedMedia {
 
 /**
  * Resolve TMDB ID (movie or TV series) or IMDB ID to get:
- * - Real IMDB ID (e.g. tt14681596)
+ * - Real IMDB ID (e.g. tt14688458)
  * - Media type ('movie' or 'series')
- * - Title name (e.g. "Batman: Caped Crusader")
+ * - Title name (e.g. "Silo" or "Inception")
  */
-async function resolveMediaInfo(tmdbIdOrQuery: string): Promise<ResolvedMedia> {
+async function resolveMediaInfo(tmdbIdOrQuery: string, titleHint?: string): Promise<ResolvedMedia> {
   const input = String(tmdbIdOrQuery || '').trim();
-  if (!input) return { imdbId: '', type: 'movie', title: '' };
+  const apiKey = getTmdbApiKey();
+  const fallbackTitle = titleHint || (input && !/^\d+$/.test(input) ? input : '');
 
-  // If input is already an IMDB ID (e.g. tt14681596)
+  if (!input && !titleHint) return { imdbId: '', type: 'movie', title: '' };
+
+  // If input is already an IMDB ID (e.g. tt14688458)
   if (/^tt\d+$/i.test(input)) {
     try {
       const res = await fetch(`https://v3-cinemeta.strem.io/meta/series/${input}.json`, { headers: DEFAULT_HEADERS });
@@ -122,7 +127,7 @@ async function resolveMediaInfo(tmdbIdOrQuery: string): Promise<ResolvedMedia> {
         const data = await res.json();
         if (data?.meta?.type === 'series') {
           console.log(`[main.ts] Recognized IMDB ID ${input} as TV series: "${data.meta.name}"`);
-          return { imdbId: input, type: 'series', title: data.meta.name || input };
+          return { imdbId: input, type: 'series', title: data.meta.name || fallbackTitle || input };
         }
       }
     } catch {}
@@ -133,26 +138,26 @@ async function resolveMediaInfo(tmdbIdOrQuery: string): Promise<ResolvedMedia> {
         const data = await res.json();
         if (data?.meta?.name) {
           console.log(`[main.ts] Recognized IMDB ID ${input} as movie: "${data.meta.name}"`);
-          return { imdbId: input, type: 'movie', title: data.meta.name };
+          return { imdbId: input, type: 'movie', title: data.meta.name || fallbackTitle || input };
         }
       }
     } catch {}
 
-    return { imdbId: input, type: 'movie', title: input };
+    return { imdbId: input, type: 'movie', title: fallbackTitle || input };
   }
 
-  // If numeric TMDB ID (e.g. 125909 or 1375666)
-  if (/^\d+$/.test(input) && TMDB_API_KEY && TMDB_API_KEY !== 'your_tmdb_api_key_here') {
+  // If numeric TMDB ID (e.g. 125988 or 1375666)
+  if (/^\d+$/.test(input) && apiKey) {
     // 1. Try TMDB Movie API
     try {
-      const movieRes = await fetch(`https://api.themoviedb.org/3/movie/${input}?api_key=${TMDB_API_KEY}`, { headers: DEFAULT_HEADERS });
+      const movieRes = await fetch(`https://api.themoviedb.org/3/movie/${input}?api_key=${apiKey}`, { headers: DEFAULT_HEADERS });
       if (movieRes.ok) {
         const movieData = await movieRes.json();
-        const extRes = await fetch(`https://api.themoviedb.org/3/movie/${input}/external_ids?api_key=${TMDB_API_KEY}`, { headers: DEFAULT_HEADERS });
+        const extRes = await fetch(`https://api.themoviedb.org/3/movie/${input}/external_ids?api_key=${apiKey}`, { headers: DEFAULT_HEADERS });
         const extData = await extRes.json();
-        const resolvedImdb = extData?.imdb_id || input;
+        const resolvedImdb = (extData?.imdb_id && extData.imdb_id.startsWith('tt')) ? extData.imdb_id : '';
         console.log(`[main.ts] Resolved TMDB Movie ID ${input} → IMDB ID ${resolvedImdb} ("${movieData.title}")`);
-        return { imdbId: resolvedImdb, type: 'movie', title: movieData.title || '' };
+        return { imdbId: resolvedImdb, type: 'movie', title: movieData.title || fallbackTitle || input };
       }
     } catch (e: any) {
       console.log(`[main.ts] TMDB movie lookup error for ${input}: ${e?.message || e}`);
@@ -160,22 +165,22 @@ async function resolveMediaInfo(tmdbIdOrQuery: string): Promise<ResolvedMedia> {
 
     // 2. Try TMDB TV API
     try {
-      const tvRes = await fetch(`https://api.themoviedb.org/3/tv/${input}?api_key=${TMDB_API_KEY}`, { headers: DEFAULT_HEADERS });
+      const tvRes = await fetch(`https://api.themoviedb.org/3/tv/${input}?api_key=${apiKey}`, { headers: DEFAULT_HEADERS });
       if (tvRes.ok) {
         const tvData = await tvRes.json();
-        const extRes = await fetch(`https://api.themoviedb.org/3/tv/${input}/external_ids?api_key=${TMDB_API_KEY}`, { headers: DEFAULT_HEADERS });
+        const extRes = await fetch(`https://api.themoviedb.org/3/tv/${input}/external_ids?api_key=${apiKey}`, { headers: DEFAULT_HEADERS });
         const extData = await extRes.json();
-        const resolvedImdb = extData?.imdb_id || input;
+        const resolvedImdb = (extData?.imdb_id && extData.imdb_id.startsWith('tt')) ? extData.imdb_id : '';
         console.log(`[main.ts] Resolved TMDB TV ID ${input} → IMDB ID ${resolvedImdb} ("${tvData.name}")`);
-        return { imdbId: resolvedImdb, type: 'series', title: tvData.name || '' };
+        return { imdbId: resolvedImdb, type: 'series', title: tvData.name || fallbackTitle || input };
       }
     } catch (e: any) {
       console.log(`[main.ts] TMDB TV lookup error for ${input}: ${e?.message || e}`);
     }
   }
 
-  // Fallback: Return raw query as title
-  return { imdbId: input, type: 'movie', title: input };
+  // Fallback: If tmdbId lookup failed or input is text
+  return { imdbId: '', type: 'movie', title: fallbackTitle || input };
 }
 
 export interface StreamItem {
@@ -411,9 +416,10 @@ function createWindow() {
     },
   });
 
-  // Electron loads the Next.js dev server (or a custom URL via VITE_DEV_SERVER_URL).
-  // The Host UI is served by Next.js itself — no separate Vite build pipeline needed.
-  const startUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:3000';
+  // Electron loads the Next.js dev server or deployed Railway URL (via WEB_APP_URL or VITE_DEV_SERVER_URL).
+  // Default to http://localhost:3000 if not specified.
+  const startUrl = process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_WEB_URL || process.env.VITE_DEV_SERVER_URL || 'http://localhost:3000';
+  console.log('[main.ts] Loading Web App URL:', startUrl);
   mainWindow.loadURL(startUrl);
 
   // Bypass CORS Headers Globally
@@ -534,11 +540,11 @@ const SEARCH_IN_FLIGHT = new Set<string>();
 // 3. Try APIBay / PirateBay API (Fast, no Cloudflare block)
 // 4. Try EZTV (TV Series)
 // 5. Try YTS mirrors (Movies)
-ipcMain.on('stream:search', async (event, { tmdbId }) => {
+ipcMain.on('stream:search', async (event, { tmdbId, title }) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
 
-  const rawQuery = String(tmdbId || '').trim();
+  const rawQuery = String(tmdbId || title || '').trim();
   if (rawQuery && SEARCH_IN_FLIGHT.has(rawQuery)) {
     console.log(`[main.ts] Duplicate stream:search ignored for: ${rawQuery}`);
     return;
@@ -569,8 +575,9 @@ ipcMain.on('stream:search', async (event, { tmdbId }) => {
       return;
     }
 
-    const rawIdOrTitle = String(tmdbId).trim();
-    const media = await resolveMediaInfo(rawIdOrTitle);
+    const rawIdOrTitle = String(tmdbId || '').trim();
+    const titleHint = String(title || '').trim();
+    const media = await resolveMediaInfo(rawIdOrTitle, titleHint);
     console.log(`[main.ts] Resolved Media: imdbId=${media.imdbId}, type=${media.type}, title="${media.title}"`);
 
     // Helper to filter and send sorted streams
