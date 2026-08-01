@@ -4,7 +4,7 @@ import next from 'next';
 import { Server } from 'socket.io';
 import { setupSocketHandlers } from './socketHandlers.js';
 
-const dev = process.env.NODE_ENV !== 'production';
+const dev = false; // Always production on Railway
 const port = parseInt(process.env.PORT || '3000');
 
 const app = next({ dev });
