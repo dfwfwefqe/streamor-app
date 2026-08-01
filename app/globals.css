@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-zinc-950 text-slate-100 min-h-screen antialiased selection:bg-purple-500/30;
+  }
+}
+
+/* Fallback variables for next/font if needed */
+:root {
+  --background: #09090b; /* zinc-950 */
+  --foreground: #f1f5f9; /* slate-100 */
+}
