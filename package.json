@@ -7,9 +7,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node custom-server.js",
     "start:socket": "node server.js",
-    "start:all": "npx concurrently --names \"NEXT,SOCKET\" --prefix-colors \"cyan,yellow\" \"next start\" \"node server.js\"",
+    "start:all": "node custom-server.js",
     "electron:dev": "tsc electron/main.ts electron/preload.ts electron/torrentManager.ts --outDir dist-electron --esModuleInterop --module NodeNext --moduleResolution NodeNext --ignoreConfig && electron dist-electron/main.js",
     "lint": "next lint",
     "socket": "node server.js"

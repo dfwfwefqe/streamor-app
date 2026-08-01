@@ -10,7 +10,9 @@ import StreamResolver from '@/components/StreamResolver';
 import RoomInfoPanel from '@/components/RoomInfoPanel';
 import { useRoomStore } from '@/store/useRoomStore';
 
-const SIGNALING_SERVER = process.env.NEXT_PUBLIC_SIGNALING_SERVER || 'http://localhost:3001';
+// In production Socket.IO runs on the same origin as Next.js
+const SIGNALING_SERVER = process.env.NEXT_PUBLIC_SIGNALING_SERVER ||
+  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001');
 
 export default function RoomPage() {
   const params = useParams();

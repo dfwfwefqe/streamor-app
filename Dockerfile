@@ -11,8 +11,8 @@ COPY . .
 # Build Next.js
 RUN npm run build
 
-# Socket.IO server runs on 3001, Next.js on PORT (env)
-# We'll use concurrently to run both
-EXPOSE 3000 3001
+# Expose the port Railway assigns
+EXPOSE 3000
 
-CMD ["npm", "run", "start:all"]
+# Start custom server (Next.js + Socket.IO on same port)
+CMD ["npm", "run", "start"]
