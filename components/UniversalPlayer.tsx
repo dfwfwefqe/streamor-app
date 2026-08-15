@@ -11,6 +11,9 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:stun.nextcloud.com:443' },
+  { urls: 'stun:stun.twilio.com:3478' },
   // Public TURN relay fallback for hosts/guests behind symmetric NATs
   { urls: 'turn:openrelay.metered.ca:80', username: 'openrelay', credential: 'openrelay' },
   { urls: 'turn:openrelay.metered.ca:443', username: 'openrelay', credential: 'openrelay' },
