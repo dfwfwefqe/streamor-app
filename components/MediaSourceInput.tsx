@@ -30,7 +30,8 @@ export default function MediaSourceInput({ socket }: MediaSourceInputProps) {
     }
   }, []);
 
-  if (role !== 'host') return null;
+  const isHost = String(role || '').toLowerCase() === 'host';
+  if (!isHost) return null;
 
   const isElectron = () => {
     if (typeof window !== 'undefined' && typeof window.electron !== 'undefined') {

@@ -3,15 +3,25 @@ const rooms = new Map();
 const users = new Map();
 
 /**
+ * Normalize tmdbId to number|null.
+ */
+function normalizeTmdbId(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
  * Handle a user joining a room.
  * @param {string} socketId - The socket ID.
  * @param {string} roomId - The ID of the room.
- * @param {object} userPayload - The user payload {userId, username}.
+ * @param {object} userPayload - The user payload {userId, username, title?, tmdbId?}.
  * @returns {object} { room, role, isNewRoom }
  */
 export const joinRoom = (socketId, roomId, userPayload) => {
   let isNewRoom = false;
   let room = rooms.get(roomId);
+  const tmdbId = normalizeTmdbId(userPayload.tmdbId);
 
   if (!room) {
     // Create new room if it doesn't exist
@@ -22,13 +32,14 @@ export const joinRoom = (socketId, roomId, userPayload) => {
       playbackTimestamp: 0,
       isPlaying: false,
       title: userPayload.title || 'Watch Party',
-      tmdbId: userPayload.tmdbId || null,
+      tmdbId,
       guests: []
     };
     rooms.set(roomId, room);
-  } else if (userPayload.title) {
+  } else if (userPayload.title && userPayload.title !== 'Watch Party') {
+    // Allow host metadata to update a placeholder title
     room.title = userPayload.title;
-    if (userPayload.tmdbId) room.tmdbId = userPayload.tmdbId;
+    if (tmdbId) room.tmdbId = tmdbId;
   }
 
   const role = room.hostId === socketId ? 'Host' : 'Guest';

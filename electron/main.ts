@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
-import { TorrentManager } from './torrentManager.js';
+import torrentManager, { BEST_PUBLIC_TRACKERS } from './torrentManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -68,22 +68,13 @@ const YTS_MIRRORS = [
 const TORRENTIO_BASE_URLS = [
   'https://torrentio.strem.fun',
   'https://torrentio.fastcast.workers.dev',
-  'https://torrentio.noc.workers.dev',
-  'https://www.torrentio.strem.fun',
-  'https://stream.torrentio.strem.fun'
+  'https://torrentio.noc.workers.dev'
 ];
 
-// Common trackers injected into every magnet link for better peer discovery.
-const TRACKERS = [
-  'udp://open.demonii.com:1337/announce',
-  'udp://tracker.openbittorrent.com:80',
-  'udp://tracker.coppersurfer.tk:6969',
-  'udp://glotorrents.pw:6969/announce',
-  'udp://tracker.opentrackr.org:1337/announce',
-  'udp://torrent.gresille.org:80/announce',
-  'udp://p4p.arenabg.com:1337',
-  'udp://tracker.leechers-paradise.org:6969'
-];
+// Shared tracker list (native UDP/HTTP first, WSS fallback) from torrentManager
+const TRACKERS = BEST_PUBLIC_TRACKERS;
+
+const trackerQuery = TRACKERS.map(t => `tr=${encodeURIComponent(t)}`).join('&');
 
 // Read system proxy from environment (used by VPN/proxy software on Windows)
 function getSystemProxy(): string | null {
@@ -148,35 +139,50 @@ async function resolveMediaInfo(tmdbIdOrQuery: string, titleHint?: string): Prom
 
   // If numeric TMDB ID (e.g. 125988 or 1375666)
   if (/^\d+$/.test(input) && apiKey) {
-    // 1. Try TMDB Movie API
-    try {
-      const movieRes = await fetch(`https://api.themoviedb.org/3/movie/${input}?api_key=${apiKey}`, { headers: DEFAULT_HEADERS });
-      if (movieRes.ok) {
-        const movieData = await movieRes.json();
-        const extRes = await fetch(`https://api.themoviedb.org/3/movie/${input}/external_ids?api_key=${apiKey}`, { headers: DEFAULT_HEADERS });
-        const extData = await extRes.json();
-        const resolvedImdb = (extData?.imdb_id && extData.imdb_id.startsWith('tt')) ? extData.imdb_id : '';
-        console.log(`[main.ts] Resolved TMDB Movie ID ${input} → IMDB ID ${resolvedImdb} ("${movieData.title}")`);
-        return { imdbId: resolvedImdb, type: 'movie', title: movieData.title || fallbackTitle || input };
+    const fetchWithTimeout = async (url: string, ms = 4000) => {
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), ms);
+      try {
+        const res = await fetch(url, { signal: c.signal, headers: DEFAULT_HEADERS });
+        clearTimeout(t);
+        return res;
+      } catch (err) {
+        clearTimeout(t);
+        throw err;
       }
-    } catch (e: any) {
-      console.log(`[main.ts] TMDB movie lookup error for ${input}: ${e?.message || e}`);
-    }
+    };
 
-    // 2. Try TMDB TV API
+    // 1. Check TV API
     try {
-      const tvRes = await fetch(`https://api.themoviedb.org/3/tv/${input}?api_key=${apiKey}`, { headers: DEFAULT_HEADERS });
+      const tvRes = await fetchWithTimeout(`https://api.themoviedb.org/3/tv/${input}?api_key=${apiKey}`, 3500);
       if (tvRes.ok) {
         const tvData = await tvRes.json();
-        const extRes = await fetch(`https://api.themoviedb.org/3/tv/${input}/external_ids?api_key=${apiKey}`, { headers: DEFAULT_HEADERS });
-        const extData = await extRes.json();
-        const resolvedImdb = (extData?.imdb_id && extData.imdb_id.startsWith('tt')) ? extData.imdb_id : '';
+        let resolvedImdb = '';
+        try {
+          const extRes = await fetchWithTimeout(`https://api.themoviedb.org/3/tv/${input}/external_ids?api_key=${apiKey}`, 3000);
+          const extData = await extRes.json();
+          resolvedImdb = (extData?.imdb_id && extData.imdb_id.startsWith('tt')) ? extData.imdb_id : '';
+        } catch (_) {}
         console.log(`[main.ts] Resolved TMDB TV ID ${input} → IMDB ID ${resolvedImdb} ("${tvData.name}")`);
         return { imdbId: resolvedImdb, type: 'series', title: tvData.name || fallbackTitle || input };
       }
-    } catch (e: any) {
-      console.log(`[main.ts] TMDB TV lookup error for ${input}: ${e?.message || e}`);
-    }
+    } catch (_) {}
+
+    // 2. Check Movie API
+    try {
+      const movieRes = await fetchWithTimeout(`https://api.themoviedb.org/3/movie/${input}?api_key=${apiKey}`, 3500);
+      if (movieRes.ok) {
+        const movieData = await movieRes.json();
+        let resolvedImdb = '';
+        try {
+          const extRes = await fetchWithTimeout(`https://api.themoviedb.org/3/movie/${input}/external_ids?api_key=${apiKey}`, 3000);
+          const extData = await extRes.json();
+          resolvedImdb = (extData?.imdb_id && extData.imdb_id.startsWith('tt')) ? extData.imdb_id : '';
+        } catch (_) {}
+        console.log(`[main.ts] Resolved TMDB Movie ID ${input} → IMDB ID ${resolvedImdb} ("${movieData.title}")`);
+        return { imdbId: resolvedImdb, type: 'movie', title: movieData.title || fallbackTitle || input };
+      }
+    } catch (_) {}
   }
 
   // Fallback: If tmdbId lookup failed or input is text
@@ -192,19 +198,19 @@ export interface StreamItem {
 }
 
 /**
- * Fetch streams from Torrentio. Supports both movies and TV series.
+ * Fetch streams from Torrentio. Supports both movies and TV series (with season/episode).
  */
-async function fetchTorrentioStreams(imdbId: string, type: 'movie' | 'series'): Promise<StreamItem[] | null> {
+async function fetchTorrentioStreams(imdbId: string, type: 'movie' | 'series', season = 1, episode = 1): Promise<StreamItem[] | null> {
   if (!imdbId || !imdbId.startsWith('tt')) return null;
   const trackerQuery = TRACKERS.map(t => `tr=${encodeURIComponent(t)}`).join('&');
 
   for (const baseUrl of TORRENTIO_BASE_URLS) {
-    const urlPath = type === 'series' ? `/stream/series/${imdbId}:1:1.json` : `/stream/movie/${imdbId}.json`;
+    const urlPath = type === 'series' ? `/stream/series/${imdbId}:${season}:${episode}.json` : `/stream/movie/${imdbId}.json`;
     const url = `${baseUrl}${urlPath}`;
     console.log(`[main.ts] Trying Torrentio mirror: ${url}`);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
 
     try {
       const response = await fetch(url, {
@@ -343,7 +349,8 @@ async function fetchEztvStreams(imdbId: string): Promise<StreamItem[] | null> {
       }
 
       const seeders = Number(item.seeds) || 0;
-      const magnet = item.magnet_url || `magnet:?xt=urn:btih:${item.hash}&dn=${encodeURIComponent(rawTitle)}`;
+      const baseMagnet = item.magnet_url || `magnet:?xt=urn:btih:${item.hash}&dn=${encodeURIComponent(rawTitle)}`;
+      const magnet = baseMagnet.includes('tr=') ? baseMagnet : `${baseMagnet}&${trackerQuery}`;
       results.push({ title: rawTitle, quality, size: sizeStr, seeders, magnet });
     }
 
@@ -399,7 +406,7 @@ async function fetchYtsWithFallback(query: string): Promise<any[]> {
 }
 
 let mainWindow: BrowserWindow | null = null;
-let torrentManager: TorrentManager | null = null;
+// removed let torrentManager declaration
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -437,6 +444,24 @@ function createWindow() {
   });
 }
 
+// Prevent network/WebRTC aborts in webtorrent/polyfill from crashing the app
+process.on('uncaughtException', (error) => {
+  // Ignore specific expected disconnection/abort errors
+  if (
+    error.message.includes('User-Initiated Abort') ||
+    error.message.includes('Close called') ||
+    error.name === 'OperationError'
+  ) {
+    console.warn('[main.ts] Ignored specific WebRTC/network abort:', error.message);
+    return;
+  }
+  console.error('[main.ts] Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[main.ts] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 app.whenReady().then(() => {
   // Set proxy from system/VPN automatically
   const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
@@ -457,10 +482,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', async () => {
   // Clean up torrent and server on quit to free memory
-  if (torrentManager) {
     await torrentManager.destroy();
-    torrentManager = null;
-  }
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -540,19 +562,23 @@ const SEARCH_IN_FLIGHT = new Set<string>();
 // 3. Try APIBay / PirateBay API (Fast, no Cloudflare block)
 // 4. Try EZTV (TV Series)
 // 5. Try YTS mirrors (Movies)
-ipcMain.on('stream:search', async (event, { tmdbId, title }) => {
+ipcMain.on('stream:search', async (event, { tmdbId, title, season, episode }) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
 
   const rawQuery = String(tmdbId || title || '').trim();
-  if (rawQuery && SEARCH_IN_FLIGHT.has(rawQuery)) {
-    console.log(`[main.ts] Duplicate stream:search ignored for: ${rawQuery}`);
+  const s = Number(season) || 1;
+  const e = Number(episode) || 1;
+  const searchKey = `${rawQuery}::${s}:${e}`;
+
+  if (searchKey && SEARCH_IN_FLIGHT.has(searchKey)) {
+    console.log(`[main.ts] Duplicate stream:search ignored for: ${searchKey}`);
     return;
   }
-  if (rawQuery) SEARCH_IN_FLIGHT.add(rawQuery);
+  if (searchKey) SEARCH_IN_FLIGHT.add(searchKey);
 
   const clearInFlight = () => {
-    if (rawQuery) SEARCH_IN_FLIGHT.delete(rawQuery);
+    if (searchKey) SEARCH_IN_FLIGHT.delete(searchKey);
   };
 
   try {
@@ -601,59 +627,48 @@ ipcMain.on('stream:search', async (event, { tmdbId, title }) => {
     };
 
     const aggregatedStreams: StreamItem[] = [];
+    const s = Number(season) || 1;
+    const e = Number(episode) || 1;
 
-    // --- 1. Torrentio ---
-    const torrentioResults = await fetchTorrentioStreams(media.imdbId, media.type);
-    if (torrentioResults && torrentioResults.length > 0) {
-      // Check if Torrentio provided streams with healthy seeders (> 0)
-      const healthyTorrentio = torrentioResults.filter(s => s.seeders > 0);
-      if (healthyTorrentio.length > 0) {
-        sendSortedStreams(healthyTorrentio);
-        return;
-      }
-      aggregatedStreams.push(...torrentioResults);
-    }
+    console.log(`[main.ts] Launching concurrent stream searches for ${media.type} "${media.title}" (IMDB: ${media.imdbId || 'N/A'}) S${s}E${e}`);
 
-    // --- 2. APIBay (ThePirateBay API) ---
-    console.log(`[main.ts] Checking APIBay fallback for: ${media.imdbId} / "${media.title}"`);
-    const apibayResults = await fetchApibayStreams(media.imdbId, media.title);
-    if (apibayResults && apibayResults.length > 0) {
-      aggregatedStreams.push(...apibayResults);
-    }
+    const tasks: Promise<StreamItem[] | null>[] = [
+      fetchTorrentioStreams(media.imdbId, media.type, s, e),
+      fetchApibayStreams(media.imdbId, media.title)
+    ];
 
-    // --- 3. EZTV (for TV Series) ---
     if (media.type === 'series' && media.imdbId) {
-      console.log(`[main.ts] Checking EZTV fallback for TV series: ${media.imdbId}`);
-      const eztvResults = await fetchEztvStreams(media.imdbId);
-      if (eztvResults && eztvResults.length > 0) {
-        aggregatedStreams.push(...eztvResults);
-      }
-    }
-
-    // --- 4. YTS (for Movies) ---
-    const ytsQuery = media.imdbId.startsWith('tt') ? media.imdbId : (media.title || rawIdOrTitle);
-    console.log(`[main.ts] Checking YTS fallback for: ${ytsQuery}`);
-    try {
-      const movies = await fetchYtsWithFallback(encodeURIComponent(ytsQuery));
-      if (movies && movies.length > 0) {
-        const trackerQuery = TRACKERS.map(t => `tr=${encodeURIComponent(t)}`).join('&');
-        for (const movie of movies) {
-          if (movie && movie.torrents) {
-            for (const t of movie.torrents) {
-              const magnet = `magnet:?xt=urn:btih:${t.hash}&dn=${encodeURIComponent(movie.title)}&${trackerQuery}`;
-              aggregatedStreams.push({
-                title: movie.title,
-                quality: t.quality || 'Unknown',
-                size: t.size || 'Unknown',
-                seeders: Number(t.seeds) || 10,
-                magnet: magnet
-              });
+      tasks.push(fetchEztvStreams(media.imdbId));
+    } else if (media.type === 'movie') {
+      const ytsQuery = media.imdbId.startsWith('tt') ? media.imdbId : (media.title || rawIdOrTitle);
+      tasks.push(
+        fetchYtsWithFallback(encodeURIComponent(ytsQuery)).then(movies => {
+          if (!movies || movies.length === 0) return null;
+          const trackerQuery = TRACKERS.map(t => `tr=${encodeURIComponent(t)}`).join('&');
+          const results: StreamItem[] = [];
+          for (const movie of movies) {
+            if (movie?.torrents) {
+              for (const t of movie.torrents) {
+                results.push({
+                  title: movie.title,
+                  quality: t.quality || 'Unknown',
+                  size: t.size || 'Unknown',
+                  seeders: Number(t.seeds) || 10,
+                  magnet: `magnet:?xt=urn:btih:${t.hash}&dn=${encodeURIComponent(movie.title)}&${trackerQuery}`
+                });
+              }
             }
           }
-        }
+          return results;
+        }).catch(() => null)
+      );
+    }
+
+    const settled = await Promise.allSettled(tasks);
+    for (const res of settled) {
+      if (res.status === 'fulfilled' && res.value && Array.isArray(res.value)) {
+        aggregatedStreams.push(...res.value);
       }
-    } catch (fetchErr: any) {
-      console.log(`[main.ts] YTS fallback failed: ${fetchErr?.message || fetchErr}`);
     }
 
     if (aggregatedStreams.length > 0) {
@@ -676,47 +691,20 @@ ipcMain.on('stream:search', async (event, { tmdbId, title }) => {
 
 // torrent:start — Renderer sends a magnet link, we destroy previous and start new
 ipcMain.on('torrent:start', async (event, magnet: string) => {
-  console.log('[IPC] Received torrent:start');
-  console.log('[IPC] Magnet:', magnet.substring(0, 50) + '...');
-
   try {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win) return;
-
-    // Create or reuse TorrentManager
-    if (!torrentManager) {
-      torrentManager = new TorrentManager(
-        (streamUrl, infoHash) => {
-          if (win && !win.isDestroyed()) {
-            win.webContents.send('torrent:ready', { streamUrl, infoHash });
-          }
-        },
-        (progress) => {
-          if (win && !win.isDestroyed()) {
-            win.webContents.send('torrent:progress', progress);
-          }
-        },
-        (errorObj) => {
-          if (win && !win.isDestroyed()) {
-            win.webContents.send('torrent:error', errorObj);
-          }
-        }
-      );
-    }
-
-    console.log('[IPC] Calling torrentManager.start...');
-    await torrentManager.start(magnet);
-    console.log('[IPC] torrentManager.start executed successfully');
-
-  } catch (err: any) {
-    // Normalize to the same { code, message } shape used everywhere else
-    // (TorrentManager's onError, preload's onTorrentError type), so the
-    // renderer never receives an inconsistent/empty error payload.
-    const message = err?.message || String(err) || 'خطای ناشناخته در استارت تورنت.';
-    console.error('[IPC] Error in torrentManager.start:', message);
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('torrent:error', { code: 'STREAM_ERROR', message });
+    const { streamUrl, infoHash } = await torrentManager.startTorrent(magnet, 60000, (prog) => {
+      if (event.sender && !event.sender.isDestroyed()) {
+        event.sender.send('torrent:progress', prog);
+      }
+    });
+    event.sender.send('torrent:ready', { streamUrl, infoHash });
+  } catch (error: any) {
+    console.error('[Torrent Main Error]:', error.message);
+    if (event.sender && !event.sender.isDestroyed()) {
+      event.sender.send('torrent:error', {
+        code: error.message?.includes('NO_PEERS') ? 'NO_PEERS' : 'STREAM_ERROR',
+        message: error.message || 'خطا در بارگذاری تورنت'
+      });
     }
   }
 });

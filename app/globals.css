@@ -13,3 +13,16 @@
   --background: #09090b; /* zinc-950 */
   --foreground: #f1f5f9; /* slate-100 */
 }
+
+/* Styling for HTML5 Video Subtitle Cues */
+video::cue {
+  background-color: rgba(0, 0, 0, 0.75);
+  color: #ffffff;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 1.15rem;
+  line-height: 1.5;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
+  padding: 0.2rem 0.6rem;
+  border-radius: 0.375rem;
+}

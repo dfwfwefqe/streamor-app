@@ -135,9 +135,13 @@ export const setupSocketHandlers = (io) => {
             const user = getUser(socket.id);
 
             if (!user) return socket.emit('error_occurred', { message: 'Not in a room' });
-            if (user.role !== 'Host') return socket.emit('unauthorized_action', { message: 'Only host can sync subtitle' });
-
-            socket.to(user.roomId).emit('sync_subtitle', { url: parsed.url, lang: parsed.lang });
+            socket.to(user.roomId).emit('sync_subtitle', {
+                url: parsed.url || '',
+                lang: parsed.lang || 'fa',
+                content: parsed.content || null,
+                name: parsed.name || null,
+                delay: parsed.delay || 0
+            });
         } catch (error) {
             console.error('sync_subtitle error:', error.message);
             socket.emit('error_occurred', { message: 'Invalid sync_subtitle payload', details: error.message });
@@ -269,7 +273,8 @@ function handleDisconnect(socket, io) {
         // Notify others that guest left
         io.to(cleanupInfo.roomId).emit('user_left', {
             userId: user.userId,
-            username: user.username
+            username: user.username,
+            socketId: socket.id
         });
         socket.leave(cleanupInfo.roomId);
         console.log(`Guest ${user.username} left room ${cleanupInfo.roomId}`);

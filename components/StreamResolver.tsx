@@ -25,6 +25,8 @@ export default function StreamResolver({ socket }: StreamResolverProps) {
   const [isSearching, setIsSearching] = useState(true);
   const [showManualInput, setShowManualInput] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [season, setSeason] = useState(1);
+  const [episode, setEpisode] = useState(1);
   const searchDispatchedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -42,6 +44,9 @@ export default function StreamResolver({ socket }: StreamResolverProps) {
       return;
     }
 
+    // Key includes season/episode so changing them triggers a fresh search
+    const searchKey = `${searchQuery}::${season}:${episode}`;
+
     setIsSearching(true);
     setError(null);
 
@@ -54,20 +59,28 @@ export default function StreamResolver({ socket }: StreamResolverProps) {
       }
     });
 
-    // 2. Dispatch IPC search request if not already dispatched for this query
-    if (searchDispatchedRef.current !== searchQuery) {
-      searchDispatchedRef.current = searchQuery;
-      console.log('[StreamResolver] Dispatching stream search for:', searchQuery, 'titleHint:', title);
-      (window as any).electron.searchStreams(searchQuery, title || undefined);
+    // 2. Timeout safeguard: avoid infinite spinner if provider times out
+    const timeout = setTimeout(() => {
+      if (isMounted) {
+        setIsSearching(false);
+      }
+    }, 12000);
+
+    // 3. Dispatch IPC search request if not already dispatched for this query
+    if (searchDispatchedRef.current !== searchKey) {
+      searchDispatchedRef.current = searchKey;
+      console.log('[StreamResolver] Dispatching stream search for:', searchQuery, 'titleHint:', title, 'S' + season + 'E' + episode);
+      (window as any).electron.searchStreams(searchQuery, title || undefined, { season, episode });
     }
 
     return () => {
       isMounted = false;
+      clearTimeout(timeout);
       if (removeListener) {
         removeListener();
       }
     };
-  }, [title, tmdbId]);
+  }, [title, tmdbId, season, episode]);
 
   const handleSelectStream = (magnet: string) => {
     setMediaUrl(magnet);
@@ -85,8 +98,8 @@ export default function StreamResolver({ socket }: StreamResolverProps) {
 
     if (typeof window !== 'undefined' && (window as any).electron?.searchStreams) {
       const query = String((tmdbId ?? title) || '').trim();
-      console.log('[StreamResolver] Manual Retry for:', query, 'titleHint:', title);
-      (window as any).electron.searchStreams(query, title || undefined);
+      console.log('[StreamResolver] Manual Retry for:', query, 'titleHint:', title, 'S' + season + 'E' + episode);
+      (window as any).electron.searchStreams(query, title || undefined, { season, episode });
     }
   };
 
@@ -179,12 +192,46 @@ export default function StreamResolver({ socket }: StreamResolverProps) {
                     <p className="text-sm text-zinc-400 mt-1">{title || 'در حال بارگذاری...'}</p>
                 </div>
             </div>
-            <button
-              onClick={() => setShowManualInput(true)}
-              className="text-xs bg-white/5 hover:bg-white/10 text-white/70 py-1.5 px-3 rounded-md transition-colors"
-            >
-              ورود لینک دستی
-            </button>
+
+            {/* Season / Episode selector */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 bg-black/40 border border-white/10 rounded-lg px-2.5 py-1 text-xs">
+                <span className="text-zinc-400">فصل:</span>
+                <select
+                  value={season}
+                  onChange={(e) => setSeason(Number(e.target.value))}
+                  className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
+                >
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((s) => (
+                    <option key={s} value={s} className="bg-zinc-900 text-white">
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-black/40 border border-white/10 rounded-lg px-2.5 py-1 text-xs">
+                <span className="text-zinc-400">قسمت:</span>
+                <select
+                  value={episode}
+                  onChange={(e) => setEpisode(Number(e.target.value))}
+                  className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
+                >
+                  {[...Array(30)].map((_, i) => (
+                    <option key={i + 1} value={i + 1} className="bg-zinc-900 text-white">
+                      {i + 1}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                onClick={() => setShowManualInput(true)}
+                className="text-xs bg-white/5 hover:bg-white/10 text-white/70 py-1.5 px-3 rounded-md transition-colors"
+              >
+                ورود لینک دستی
+              </button>
+            </div>
         </div>
 
         {isSearching ? (
@@ -201,6 +248,38 @@ export default function StreamResolver({ socket }: StreamResolverProps) {
              >
                 ورود دستی لینک
              </button>
+          </div>
+        ) : results.length === 0 ? (
+          <div className="text-center py-8 bg-black/30 rounded-2xl border border-white/5 p-6">
+            <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-3 text-amber-400">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <p className="text-white font-semibold text-sm mb-1">منبع تورنت فعالی برای این عنوان یافت نشد</p>
+            <p className="text-zinc-400 text-xs mb-5 leading-relaxed">
+              می‌توانید فیلترشکن را روشن کرده و «تلاش مجدد» را بزنید یا لینک مستقیم ویدیو را دستی وارد کنید.
+            </p>
+            <div className="flex items-center justify-center gap-3 flex-wrap">
+              <button
+                onClick={handleRetrySearch}
+                className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                🔄 تلاش مجدد
+              </button>
+              <button
+                onClick={() => setShowManualInput(true)}
+                className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              >
+                📝 ورود دستی لینک یا مگنت
+              </button>
+              <button
+                onClick={() => { clearRoom(); router.push('/'); }}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-4 py-2 rounded-xl text-xs transition-all cursor-pointer"
+              >
+                ← برگشت به داشبورد
+              </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">

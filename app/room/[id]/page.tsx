@@ -27,32 +27,48 @@ export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const roomId = params.id as string;
-  const { username, role, title, clearRoom, setMediaUrl, mediaUrl, setRoom } = useRoomStore();
+  const { username, role, title, tmdbId, clearRoom, setMediaUrl, mediaUrl, setRoom } = useRoomStore();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [status, setStatus] = useState<string>('Connecting...');
   const [memberCount, setMemberCount] = useState(1);
 
-  // ─── Username guard: if arrived without username (e.g. direct URL), ask ─────
-  const [pendingUsername, setPendingUsername] = useState('');
+  // ─── Username Gate ────────────────────────────────────────────────────────────
+  // Any guest (or a visitor with no stored role/username, e.g. direct URL) must
+  // explicitly submit a nickname in the gate BEFORE the Socket.IO connection is
+  // established.
+  const [hasSubmittedNickname, setHasSubmittedNickname] = useState(false);
+  const [pendingUsername, setPendingUsername] = useState(username || '');
   const [showUsernameGate, setShowUsernameGate] = useState(false);
 
   useEffect(() => {
-    if (!username || !role) {
+    const isHost = role === 'host' && Boolean(username);
+    if (!isHost && !hasSubmittedNickname) {
       setShowUsernameGate(true);
+      // Pre-fill with any username already in the store (e.g. from ActiveRoomsModal)
+      if (username && !pendingUsername) {
+        setPendingUsername(username);
+      }
+    } else {
+      setShowUsernameGate(false);
     }
-  }, [username, role]);
+  }, [username, role, hasSubmittedNickname, pendingUsername]);
 
   const handleUsernameSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const name = pendingUsername.trim() || `User_${Math.floor(Math.random() * 9999)}`;
-    // Join as guest by default when arriving via direct URL
-    setRoom(roomId, name, 'guest', 'Watch Party');
+    const nickname = pendingUsername.trim() || `User_${Math.floor(Math.random() * 9999)}`;
+    const currentTitle = title || 'Watch Party';
+    const currentTmdbId = tmdbId ?? undefined;
+
+    // Persist nickname & guest role in Zustand, then unlock the socket connection
+    setRoom(roomId, nickname, 'guest', currentTitle, currentTmdbId);
+    setHasSubmittedNickname(true);
     setShowUsernameGate(false);
   };
 
   // ─── Socket connection ────────────────────────────────────────────────────────
+  // No socket is created until the guest has submitted their nickname in the gate.
   useEffect(() => {
-    if (!username || !role) return;
+    if (showUsernameGate || !username || !role) return;
 
     const serverUrl = getSignalingServer();
     console.log('[Room] Connecting to signaling server:', serverUrl);
@@ -63,7 +79,12 @@ export default function RoomPage() {
       setStatus('Connected');
       newSocket.emit('join_room', {
         roomId,
-        user: { userId: `${role}-${Math.random().toString(36).substring(2, 9)}`, username }
+        user: {
+          userId: `${role}-${Math.random().toString(36).substring(2, 9)}`,
+          username,
+          title,
+          tmdbId
+        }
       });
     });
 
@@ -74,7 +95,14 @@ export default function RoomPage() {
 
     newSocket.on('room_joined', (payload: { roomId: string; role: string; currentMedia?: string | null }) => {
       console.log('[Room] Joined room:', payload);
-      if (payload.currentMedia && role === 'guest') {
+      // IMPORTANT: read the LATEST role from the store, not the closure `role`.
+      // For guests who join via the username gate / direct URL, `role` transitions
+      // from empty -> 'guest' during the effect lifecycle, so the captured closure
+      // value can be stale (or empty) by the time this event fires. Reading it from
+      // the store guarantees we always set the current media for guests.
+      const currentRole = (useRoomStore.getState().role || payload.role || '').toLowerCase();
+      const isGuest = currentRole === 'guest';
+      if (payload.currentMedia && isGuest) {
         setMediaUrl(payload.currentMedia);
       }
     });
@@ -86,7 +114,8 @@ export default function RoomPage() {
     // Listen to source sync from host
     newSocket.on('sync_source', (payload: { url: string | null; mediaType?: string; title?: string | null }) => {
       console.log('[Room] Received sync_source from host:', payload);
-      if (role === 'guest') {
+      const currentRole = (useRoomStore.getState().role || '').toLowerCase();
+      if (currentRole === 'guest') {
         if (!payload.url) {
           // Host cleared source — UniversalPlayer handles IS_WAITING_FOR_HOST_SOURCE
           setMediaUrl('');
@@ -106,7 +135,7 @@ export default function RoomPage() {
     return () => {
       newSocket.disconnect();
     };
-  }, [roomId, username, role, setMediaUrl, clearRoom, router]);
+  }, [roomId, username, role, title, tmdbId, showUsernameGate, setMediaUrl, clearRoom, router]);
 
   // ─── Username Gate Overlay ────────────────────────────────────────────────────
   if (showUsernameGate) {

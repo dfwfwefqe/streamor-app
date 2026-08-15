@@ -1,0 +1,13 @@
+- [/] Deploy to Railway using CLI
+  - [ ] Install @railway/cli
+  - [ ] Configure RAILWAY_TOKEN
+  - [ ] Initialize and link Railway project
+  - [ ] Deploy (railway up)
+  - [ ] Get Production URL
+- [ ] Update Code with Production URL
+  - [ ] Update `app/room/[id]/page.tsx`
+  - [ ] Update `electron/main.ts`
+- [ ] Build Final Electron Executable
+  - [ ] Compile TS files
+  - [ ] Run `electron-builder`
+- [ ] Create Walkthrough and deliver `.exe` to user

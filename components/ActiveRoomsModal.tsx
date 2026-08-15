@@ -60,12 +60,15 @@ export default function ActiveRoomsModal() {
   if (!isActiveRoomsModalOpen) return null;
 
   const handleJoinRoom = (targetRoomId: string, roomTitle?: string, tmdbId?: number | null) => {
-    if (!username.trim() || !targetRoomId.trim()) return;
+    if (!targetRoomId.trim()) return;
 
+    // A username is optional here: if the guest hasn't typed one, they will be
+    // prompted by the clean Username Gate on the room page before joining the
+    // Socket.IO room. Pass along whatever nickname was entered (if any) as a default.
     const event = new CustomEvent('join_room_request', {
       detail: {
         roomId: targetRoomId.toUpperCase(),
-        username,
+        username: (username || '').trim(),
         title: roomTitle || 'Watch Party',
         role: 'guest',
         tmdbId: tmdbId ?? null
