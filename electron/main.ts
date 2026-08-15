@@ -138,51 +138,27 @@ async function resolveMediaInfo(tmdbIdOrQuery: string, titleHint?: string): Prom
   }
 
   // If numeric TMDB ID (e.g. 125988 or 1375666)
-  if (/^\d+$/.test(input) && apiKey) {
-    const fetchWithTimeout = async (url: string, ms = 4000) => {
+  if (/^\d+$/.test(input)) {
+    try {
+      const serverUrl = process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_WEB_URL || process.env.VITE_DEV_SERVER_URL || 'https://streamor-app-production-2280.up.railway.app';
+      const proxyUrl = `${serverUrl}/api/tmdb/resolve?id=${input}`;
+      console.log(`[main.ts] Resolving TMDB ID ${input} via proxy: ${proxyUrl}`);
+      
       const c = new AbortController();
-      const t = setTimeout(() => c.abort(), ms);
-      try {
-        const res = await fetch(url, { signal: c.signal, headers: DEFAULT_HEADERS });
-        clearTimeout(t);
-        return res;
-      } catch (err) {
-        clearTimeout(t);
-        throw err;
+      const t = setTimeout(() => c.abort(), 6000);
+      const res = await fetch(proxyUrl, { signal: c.signal, headers: DEFAULT_HEADERS });
+      clearTimeout(t);
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.imdbId) {
+          console.log(`[main.ts] Proxy resolved TMDB ID ${input} → IMDB ID ${data.imdbId} ("${data.title}") [type=${data.type}]`);
+          return { imdbId: data.imdbId, type: data.type as 'movie' | 'series', title: data.title || fallbackTitle || input };
+        }
       }
-    };
-
-    // 1. Check TV API
-    try {
-      const tvRes = await fetchWithTimeout(`https://api.themoviedb.org/3/tv/${input}?api_key=${apiKey}`, 3500);
-      if (tvRes.ok) {
-        const tvData = await tvRes.json();
-        let resolvedImdb = '';
-        try {
-          const extRes = await fetchWithTimeout(`https://api.themoviedb.org/3/tv/${input}/external_ids?api_key=${apiKey}`, 3000);
-          const extData = await extRes.json();
-          resolvedImdb = (extData?.imdb_id && extData.imdb_id.startsWith('tt')) ? extData.imdb_id : '';
-        } catch (_) {}
-        console.log(`[main.ts] Resolved TMDB TV ID ${input} → IMDB ID ${resolvedImdb} ("${tvData.name}")`);
-        return { imdbId: resolvedImdb, type: 'series', title: tvData.name || fallbackTitle || input };
-      }
-    } catch (_) {}
-
-    // 2. Check Movie API
-    try {
-      const movieRes = await fetchWithTimeout(`https://api.themoviedb.org/3/movie/${input}?api_key=${apiKey}`, 3500);
-      if (movieRes.ok) {
-        const movieData = await movieRes.json();
-        let resolvedImdb = '';
-        try {
-          const extRes = await fetchWithTimeout(`https://api.themoviedb.org/3/movie/${input}/external_ids?api_key=${apiKey}`, 3000);
-          const extData = await extRes.json();
-          resolvedImdb = (extData?.imdb_id && extData.imdb_id.startsWith('tt')) ? extData.imdb_id : '';
-        } catch (_) {}
-        console.log(`[main.ts] Resolved TMDB Movie ID ${input} → IMDB ID ${resolvedImdb} ("${movieData.title}")`);
-        return { imdbId: resolvedImdb, type: 'movie', title: movieData.title || fallbackTitle || input };
-      }
-    } catch (_) {}
+    } catch (err: any) {
+      console.warn(`[main.ts] Proxy TMDB resolve failed:`, err.message);
+    }
   }
 
   // Fallback: If tmdbId lookup failed or input is text
@@ -425,7 +401,7 @@ function createWindow() {
 
   // Electron loads the Next.js dev server or deployed Railway URL (via WEB_APP_URL or VITE_DEV_SERVER_URL).
   // Default to production domain if not specified.
-  const startUrl = process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_WEB_URL || process.env.VITE_DEV_SERVER_URL || 'https://streamor-app-production.up.railway.app';
+  const startUrl = process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_WEB_URL || process.env.VITE_DEV_SERVER_URL || 'https://streamor-app-production-2280.up.railway.app';
   console.log('[main.ts] Loading Web App URL:', startUrl);
   mainWindow.loadURL(startUrl);
 
