@@ -595,18 +595,26 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
     peerConnectionsRef.current.set(senderId, pc);
 
     pc.ontrack = (event) => {
-      console.log('[WebRTC] Guest received remote track');
+      console.log('[WebRTC] Guest received remote track:', event.track.kind);
       if (event.streams && event.streams[0] && videoRef.current) {
         setIsWebRTCStream(true);
         setIsTorrentLoading(false);
         setTorrentStatus('');
         setError(null);
         videoRef.current.srcObject = event.streams[0];
-        // Autoplay with muted first (Chrome policy), then prompt user
-        videoRef.current.muted = false;
-        videoRef.current.play().catch(() => {
-          // Autoplay was blocked — show overlay to get user interaction
-          setNeedsUserInteraction(true);
+        
+        // Attempt unmuted play first; if browser blocks it, play muted and prompt user to unmute
+        videoRef.current.play().catch((err) => {
+          console.warn('[WebRTC] Autoplay without mute failed, falling back to muted autoplay:', err);
+          if (videoRef.current) {
+            videoRef.current.muted = true;
+            videoRef.current.play().then(() => {
+              // Show prompt so user can click and unmute
+              setNeedsUserInteraction(true);
+            }).catch(() => {
+              setNeedsUserInteraction(true);
+            });
+          }
         });
       }
     };
@@ -919,7 +927,6 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
   };
   const onSeeked = () => {
     if (isHost && socket && videoRef.current) {
-    if (isHost && socket && videoRef.current) {
       socket.emit('sync_seek', { timestamp: videoRef.current.currentTime });
     }
   };
@@ -1136,8 +1143,6 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
         onSeeked={onSeeked}
         onWaiting={() => setIsVideoBuffering(true)}
         onStalled={() => setIsVideoBuffering(true)}
-          setIsTorrentLoading(false);
-        }}
         onCanPlay={() => {
           setIsVideoBuffering(false);
           setIsTorrentLoading(false);
@@ -1149,6 +1154,7 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
         onError={handleNativeError}
         onTimeUpdate={(e) => updateActiveSubtitleCue(e.currentTarget.currentTime)}
         playsInline
+        autoPlay
       >
         {selectedSubtitle && (
           <track
