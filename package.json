@@ -2,7 +2,25 @@
   "name": "watch-party-signaling",
   "version": "1.0.0",
   "description": "Signaling and Chat Server for decentralized Watch-Party platform",
-  "main": "server.js",
+  "main": "dist-electron/main.js",
+  "build": {
+    "appId": "com.streamor.app",
+    "productName": "Streamor",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "files": [
+      "dist-electron/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ]
+  },
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -38,6 +56,7 @@
     "autoprefixer": "^10.5.4",
     "concurrently": "^10.0.4",
     "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.2.12",
     "postcss": "^8.5.25",

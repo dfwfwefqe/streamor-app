@@ -424,8 +424,8 @@ function createWindow() {
   });
 
   // Electron loads the Next.js dev server or deployed Railway URL (via WEB_APP_URL or VITE_DEV_SERVER_URL).
-  // Default to http://localhost:3000 if not specified.
-  const startUrl = process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_WEB_URL || process.env.VITE_DEV_SERVER_URL || 'http://localhost:3000';
+  // Default to production domain if not specified.
+  const startUrl = process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_WEB_URL || process.env.VITE_DEV_SERVER_URL || 'https://streamor-app-production.up.railway.app';
   console.log('[main.ts] Loading Web App URL:', startUrl);
   mainWindow.loadURL(startUrl);
 

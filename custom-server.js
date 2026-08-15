@@ -50,8 +50,8 @@ app.prepare().then(() => {
 
   setupSocketHandlers(io);
 
-  server.listen(port, () => {
-    console.log(`> Streamor ready on http://localhost:${port}`);
-    console.log(`> Socket.IO available at ws://localhost:${port}/socket.io`);
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`> Streamor ready on http://0.0.0.0:${port}`);
+    console.log(`> Socket.IO available at ws://0.0.0.0:${port}/socket.io`);
   });
 });
