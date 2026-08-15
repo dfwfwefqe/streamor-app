@@ -197,6 +197,8 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
   const [onlineSubtitles, setOnlineSubtitles] = useState<OnlineSubtitle[]>([]);
   const [isFetchingSubs, setIsFetchingSubs] = useState(false);
 
+  const pendingWebRTCRequestsRef = useRef<Set<string>>(new Set());
+
   const isHost = String(role || '').toLowerCase() === 'host';
 
   // ─── Archive Management (LocalStorage) ──────────────────────────────────────
@@ -683,7 +685,13 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
 
       const handleWebRTCRequest = (payload: { senderId: string }) => {
         console.log('[WebRTC] Host received stream request from guest:', payload.senderId);
-        startWebRTCBroadcast(payload.senderId);
+        const video = videoRef.current;
+        if (video && video.readyState >= 3) { // HAVE_FUTURE_DATA
+          startWebRTCBroadcast(payload.senderId);
+        } else {
+          console.log('[WebRTC] Video not ready yet. Queuing guest:', payload.senderId);
+          pendingWebRTCRequestsRef.current.add(payload.senderId);
+        }
       };
 
       socket.on('user_joined', handleUserJoined);
@@ -908,7 +916,18 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
   };
   const onSeeked = () => {
     if (isHost && socket && videoRef.current) {
+    if (isHost && socket && videoRef.current) {
       socket.emit('sync_seek', { timestamp: videoRef.current.currentTime });
+    }
+  };
+
+  const handlePlaying = () => {
+    if (isHost && pendingWebRTCRequestsRef.current.size > 0) {
+      console.log('[WebRTC] Video playing. Broadcasting to queued guests:', pendingWebRTCRequestsRef.current.size);
+      pendingWebRTCRequestsRef.current.forEach((guestId) => {
+        startWebRTCBroadcast(guestId);
+      });
+      pendingWebRTCRequestsRef.current.clear();
     }
   };
 
@@ -1110,11 +1129,10 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
         className={`w-full h-full object-contain ${!isHost ? 'pointer-events-none' : ''}`}
         onPlay={onPlay}
         onPause={onPause}
+        onPlaying={handlePlaying}
         onSeeked={onSeeked}
         onWaiting={() => setIsVideoBuffering(true)}
         onStalled={() => setIsVideoBuffering(true)}
-        onPlaying={() => {
-          setIsVideoBuffering(false);
           setIsTorrentLoading(false);
         }}
         onCanPlay={() => {
