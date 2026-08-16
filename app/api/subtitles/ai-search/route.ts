@@ -29,7 +29,7 @@ export async function POST(request: Request) {
 
     try {
       // Search via TMDB / YifySubtitles
-      const searchRes = await fetch(`${process.env.NEXT_PUBLIC_WEB_URL || 'https://streamor-app-production.up.railway.app'}/api/subtitles/search?query=${encodeURIComponent(movieTitle)}`, {
+      const searchRes = await fetch(`${process.env.NEXT_PUBLIC_WEB_URL || 'https://streamor-app-production-2280.up.railway.app'}/api/subtitles/search?query=${encodeURIComponent(movieTitle)}`, {
         headers: { 'Content-Type': 'application/json' }
       });
       if (searchRes.ok) {

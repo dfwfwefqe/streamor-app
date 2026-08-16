@@ -33,9 +33,11 @@
     "socket": "node server.js"
   },
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "adm-zip": "^0.6.0",
     "cors": "^2.8.5",
-    "express": "^4.19.2",
+    "express": "^4.22.2",
+    "fluent-ffmpeg": "^2.1.3",
     "hls.js": "^1.6.16",
     "memory-chunk-store": "^1.3.5",
     "next": "^16.2.12",

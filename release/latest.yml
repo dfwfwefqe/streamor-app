@@ -1,0 +1,8 @@
+version: 1.0.0
+files:
+  - url: Streamor-Setup-1.0.0.exe
+    sha512: 2kcYHNiZLBv1/aMrF7qvqgx1zXl30mM5q9vcjv1TdGOxxoRrUCWKsZgnPFl76sKTv8FbUsAsNDG5Pe6cUAypkw==
+    size: 173289050
+path: Streamor-Setup-1.0.0.exe
+sha512: 2kcYHNiZLBv1/aMrF7qvqgx1zXl30mM5q9vcjv1TdGOxxoRrUCWKsZgnPFl76sKTv8FbUsAsNDG5Pe6cUAypkw==
+releaseDate: '2026-08-15T22:11:08.912Z'
