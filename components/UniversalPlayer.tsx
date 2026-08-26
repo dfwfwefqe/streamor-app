@@ -537,25 +537,55 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
     }
 
     try {
-      // Capture the video element as a MediaStream
-      const stream = (videoRef.current as any).captureStream
-        ? (videoRef.current as any).captureStream()
-        : (videoRef.current as any).mozCaptureStream
-        ? (videoRef.current as any).mozCaptureStream()
-        : null;
+      // Get or capture stream from video element
+      let stream = localStreamRef.current;
+      if (!stream || stream.getTracks().length === 0 || !stream.active) {
+        const videoEl = videoRef.current as any;
+        stream = videoEl.captureStream ? videoEl.captureStream(30) : videoEl.mozCaptureStream ? videoEl.mozCaptureStream(30) : null;
+        localStreamRef.current = stream;
+      }
 
       if (!stream) {
         console.warn('[WebRTC] captureStream not supported in this environment');
         return;
       }
 
-      localStreamRef.current = stream;
+      // Ensure tracks exist on the stream before creating WebRTC offer
+      let tracks = stream.getTracks();
+      if (tracks.length === 0) {
+        console.log('[WebRTC] Stream has 0 tracks, waiting for video tracks to become active...');
+        tracks = await new Promise<MediaStreamTrack[]>((resolve) => {
+          const timeout = setTimeout(() => resolve(stream.getTracks()), 2500);
+          const check = () => {
+            const current = stream.getTracks();
+            if (current.length > 0) {
+              clearTimeout(timeout);
+              resolve(current);
+            }
+          };
+          stream.onaddtrack = () => check();
+          const interval = setInterval(() => {
+            check();
+            if (stream.getTracks().length > 0) {
+              clearInterval(interval);
+            }
+          }, 150);
+        });
+      }
+
+      console.log('[WebRTC] Host broadcasting stream with tracks count:', tracks.length, tracks.map(t => `${t.kind}:${t.readyState}`));
+
+      if (tracks.length === 0) {
+        console.warn('[WebRTC] Video still has no tracks. Re-queuing guest until video starts playing');
+        pendingWebRTCRequestsRef.current.add(guestSocketId);
+        return;
+      }
 
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       peerConnectionsRef.current.set(guestSocketId, pc);
 
-      stream.getTracks().forEach((track: MediaStreamTrack) => {
-        pc.addTrack(track, stream);
+      tracks.forEach((track: MediaStreamTrack) => {
+        pc.addTrack(track, stream!);
       });
 
       pc.onicecandidate = (event) => {
@@ -632,8 +662,23 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
 
     pc.onconnectionstatechange = () => {
       console.log('[WebRTC] Guest connection state:', pc.connectionState);
-      if (pc.connectionState === 'failed') {
-        setError('اتصال WebRTC قطع شد. لطفاً صفحه را رفرش کنید.');
+      if (pc.connectionState === 'connected') {
+        if (videoRef.current && remoteStreamRef.current && remoteStreamRef.current.getTracks().length > 0) {
+          setIsTorrentLoading(false);
+          setIsWebRTCStream(true);
+          setTorrentStatus('');
+          if (videoRef.current.srcObject !== remoteStreamRef.current) {
+            videoRef.current.srcObject = remoteStreamRef.current;
+          }
+          videoRef.current.play().catch(() => {
+            if (videoRef.current) {
+              videoRef.current.muted = true;
+              videoRef.current.play().catch(() => setNeedsUserInteraction(true));
+            }
+          });
+        }
+      } else if (pc.connectionState === 'failed') {
+        setError('اتصال WebRTC با میزبان برقرار نشد. لطفاً صفحه را رفرش کنید.');
         setErrorTitle('WebRTC Error');
       }
     };
