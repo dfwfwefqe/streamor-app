@@ -189,7 +189,7 @@ export const setupSocketHandlers = (io) => {
             const room = getRoom(user.roomId);
             if (!room) return;
             // Forward the request to the host, including this guest's socket ID
-            socket.to(room.hostId).emit('webrtc_stream_request', {
+            io.to(room.hostId).emit('webrtc_stream_request', {
                 senderId: socket.id
             });
             console.log(`Guest ${socket.id} requested WebRTC stream from host ${room.hostId}`);
@@ -203,8 +203,7 @@ export const setupSocketHandlers = (io) => {
         try {
             const user = getUser(socket.id);
             if (!user) return;
-            // Payload should contain { targetId, offer }
-            socket.to(payload.targetId).emit('webrtc_offer', {
+            io.to(payload.targetId).emit('webrtc_offer', {
                 senderId: socket.id,
                 offer: payload.offer
             });
@@ -217,7 +216,7 @@ export const setupSocketHandlers = (io) => {
         try {
             const user = getUser(socket.id);
             if (!user) return;
-            socket.to(payload.targetId).emit('webrtc_answer', {
+            io.to(payload.targetId).emit('webrtc_answer', {
                 senderId: socket.id,
                 answer: payload.answer
             });
@@ -230,7 +229,7 @@ export const setupSocketHandlers = (io) => {
         try {
             const user = getUser(socket.id);
             if (!user) return;
-            socket.to(payload.targetId).emit('webrtc_ice_candidate', {
+            io.to(payload.targetId).emit('webrtc_ice_candidate', {
                 senderId: socket.id,
                 candidate: payload.candidate
             });

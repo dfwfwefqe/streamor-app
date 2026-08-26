@@ -171,7 +171,9 @@ interface SavedSubtitle {
 export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const iceCandidatesQueueRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeBlobUrlRef = useRef<string | null>(null);
 
@@ -509,9 +511,14 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
   const cleanupWebRTC = useCallback(() => {
     peerConnectionsRef.current.forEach((pc) => pc.close());
     peerConnectionsRef.current.clear();
+    iceCandidatesQueueRef.current.clear();
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
+    }
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach(t => t.stop());
+      remoteStreamRef.current = null;
     }
   }, []);
 
@@ -519,26 +526,14 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
   const startWebRTCBroadcast = useCallback(async (guestSocketId: string) => {
     if (!videoRef.current || !socket) return;
 
-    // If a connection with this guest already exists, we previously made an offer
-    // (e.g. from `user_joined`). If that offer never completed — the guest joined
-    // late and its `webrtc_offer` handler wasn't ready when the offer was sent —
-    // silently returning here would swallow the guest's `webrtc_stream_request`
-    // and leave it stuck on the loading overlay forever. Re-send the pending offer
-    // as a retry, but never disturb a live session.
     const existing = peerConnectionsRef.current.get(guestSocketId);
     if (existing) {
-      const state = existing.connectionState;
-      if (
-        state !== 'connected' &&
-        existing.localDescription && existing.localDescription.type === 'offer'
-      ) {
-        socket.emit('webrtc_offer', {
-          targetId: guestSocketId,
-          offer: existing.localDescription
-        });
-        console.log('[WebRTC] Re-sent pending offer to guest:', guestSocketId);
+      if (existing.connectionState === 'connected') {
+        console.log('[WebRTC] Connection with guest already connected:', guestSocketId);
+        return;
       }
-      return;
+      try { existing.close(); } catch (_) {}
+      peerConnectionsRef.current.delete(guestSocketId);
     }
 
     try {
@@ -572,7 +567,7 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
         }
       };
 
-      const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
+      const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
       socket.emit('webrtc_offer', {
@@ -595,21 +590,28 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
     peerConnectionsRef.current.set(senderId, pc);
 
     pc.ontrack = (event) => {
-      console.log('[WebRTC] Guest received remote track:', event.track.kind);
-      if (event.streams && event.streams[0] && videoRef.current) {
+      console.log('[WebRTC] Guest received remote track:', event.track.kind, event.track.id);
+      if (!remoteStreamRef.current) {
+        remoteStreamRef.current = event.streams[0] || new MediaStream();
+      }
+      if (!remoteStreamRef.current.getTracks().some(t => t.id === event.track.id)) {
+        remoteStreamRef.current.addTrack(event.track);
+      }
+
+      if (videoRef.current) {
         setIsWebRTCStream(true);
         setIsTorrentLoading(false);
         setTorrentStatus('');
         setError(null);
-        videoRef.current.srcObject = event.streams[0];
+        if (videoRef.current.srcObject !== remoteStreamRef.current) {
+          videoRef.current.srcObject = remoteStreamRef.current;
+        }
         
-        // Attempt unmuted play first; if browser blocks it, play muted and prompt user to unmute
         videoRef.current.play().catch((err) => {
           console.warn('[WebRTC] Autoplay without mute failed, falling back to muted autoplay:', err);
           if (videoRef.current) {
             videoRef.current.muted = true;
             videoRef.current.play().then(() => {
-              // Show prompt so user can click and unmute
               setNeedsUserInteraction(true);
             }).catch(() => {
               setNeedsUserInteraction(true);
@@ -637,6 +639,18 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
     };
 
     await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+    // Drain queued ICE candidates received before remote description was ready
+    const queue = iceCandidatesQueueRef.current.get(senderId) || [];
+    for (const cand of queue) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(cand));
+      } catch (err) {
+        console.warn('[WebRTC] Failed to add queued ICE candidate on guest:', err);
+      }
+    }
+    iceCandidatesQueueRef.current.delete(senderId);
+
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
 
@@ -655,6 +669,17 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
       console.log('[WebRTC] Host received answer from', senderId, 'connection established');
+
+      // Drain queued ICE candidates
+      const queue = iceCandidatesQueueRef.current.get(senderId) || [];
+      for (const cand of queue) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (err) {
+          console.warn('[WebRTC] Failed to add queued ICE candidate on host:', err);
+        }
+      }
+      iceCandidatesQueueRef.current.delete(senderId);
     } catch (e: any) {
       console.warn('[WebRTC] Host setRemoteDescription failed:', e?.message || e);
     }
@@ -663,7 +688,12 @@ export default function UniversalPlayer({ socket }: UniversalPlayerProps) {
   // ─── Handle ICE Candidate (Host & Guest) ────────────────────────────────────
   const handleIceCandidate = useCallback(async (senderId: string, candidate: RTCIceCandidateInit) => {
     const pc = peerConnectionsRef.current.get(senderId);
-    if (!pc) return;
+    if (!pc || !pc.remoteDescription || !pc.remoteDescription.type) {
+      const queue = iceCandidatesQueueRef.current.get(senderId) || [];
+      queue.push(candidate);
+      iceCandidatesQueueRef.current.set(senderId, queue);
+      return;
+    }
     try {
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (e: any) {
