@@ -137,28 +137,29 @@ async function resolveMediaInfo(tmdbIdOrQuery: string, titleHint?: string): Prom
     return { imdbId: input, type: 'movie', title: fallbackTitle || input };
   }
 
-  // If numeric TMDB ID (e.g. 125988 or 1375666)
-  if (/^\d+$/.test(input)) {
-    try {
-      const serverUrl = process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_WEB_URL || process.env.VITE_DEV_SERVER_URL || 'https://streamor-app-production-2280.up.railway.app';
-      const proxyUrl = `${serverUrl}/api/tmdb/resolve?id=${input}`;
-      console.log(`[main.ts] Resolving TMDB ID ${input} via proxy: ${proxyUrl}`);
-      
-      const c = new AbortController();
-      const t = setTimeout(() => c.abort(), 6000);
-      const res = await fetch(proxyUrl, { signal: c.signal, headers: DEFAULT_HEADERS });
-      clearTimeout(t);
-      
-      if (res.ok) {
-        const data = await res.json();
-        if (data.imdbId) {
-          console.log(`[main.ts] Proxy resolved TMDB ID ${input} → IMDB ID ${data.imdbId} ("${data.title}") [type=${data.type}]`);
-          return { imdbId: data.imdbId, type: data.type as 'movie' | 'series', title: data.title || fallbackTitle || input };
-        }
+  // If numeric TMDB ID (e.g. 125988 or 1375666) or Title text
+  try {
+    const serverUrl = process.env.WEB_APP_URL || process.env.NEXT_PUBLIC_WEB_URL || process.env.VITE_DEV_SERVER_URL || 'https://streamor-app-production-2280.up.railway.app';
+    const isNumeric = /^\d+$/.test(input);
+    const proxyUrl = isNumeric
+      ? `${serverUrl}/api/tmdb/resolve?id=${input}`
+      : `${serverUrl}/api/tmdb/resolve?title=${encodeURIComponent(fallbackTitle || input)}`;
+    console.log(`[main.ts] Resolving TMDB ${isNumeric ? 'ID' : 'Title'} ${input} via proxy: ${proxyUrl}`);
+    
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), 6000);
+    const res = await fetch(proxyUrl, { signal: c.signal, headers: DEFAULT_HEADERS });
+    clearTimeout(t);
+    
+    if (res.ok) {
+      const data = await res.json();
+      if (data.imdbId) {
+        console.log(`[main.ts] Proxy resolved ${input} → IMDB ID ${data.imdbId} ("${data.title}") [type=${data.type}]`);
+        return { imdbId: data.imdbId, type: data.type as 'movie' | 'series', title: data.title || fallbackTitle || input };
       }
-    } catch (err: any) {
-      console.warn(`[main.ts] Proxy TMDB resolve failed:`, err.message);
     }
+  } catch (err: any) {
+    console.warn(`[main.ts] Proxy TMDB resolve failed:`, err.message);
   }
 
   // Fallback: If tmdbId lookup failed or input is text
